@@ -1,8 +1,14 @@
 ﻿<Project>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <Version>0.4.0</Version>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
   <PropertyGroup>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <!-- Roslyn caches analyzers aggressively so we are better off using a very dynamic version number 
-                 for local builds where a quick devloop is key. We bump version every 10 seconds -->
+                     for local builds where a quick devloop is key. We bump version every 10 seconds -->
     <VersionPrefix>42.42.$([System.Math]::Floor($([MSBuild]::Divide($([System.DateTime]::Now.TimeOfDay.TotalSeconds), 10))))</VersionPrefix>
     <PackOnBuild>true</PackOnBuild>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>

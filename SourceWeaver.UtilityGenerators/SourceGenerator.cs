@@ -1,0 +1,474 @@
+using System.Collections.Immutable;
+using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
+
+namespace SourceWeaver.UtilityGenerators;
+
+[Generator]
+internal sealed class SourceGenerator : IIncrementalGenerator
+{
+    private const string StartHeaderMarker = "// [GenerateSourceText]";
+    private const string EndHeaderMarker = "// [/]";
+
+    public void Initialize(IncrementalGeneratorInitializationContext context)
+    {
+        IncrementalValuesProvider<SyntaxTree> syntaxTrees = context
+            .SyntaxProvider.CreateSyntaxProvider(
+                predicate: static (node, _) => node is CompilationUnitSyntax,
+                transform: static (ctx, _) => GetTargetTree(ctx)
+            )
+            .Where(static tree => tree is not null)!;
+
+        IncrementalValueProvider<(
+            Compilation Compilation,
+            ImmutableArray<SyntaxTree> Trees
+        )> compilationAndTrees = context.CompilationProvider.Combine(syntaxTrees.Collect());
+
+        context.RegisterSourceOutput(
+            compilationAndTrees,
+            static (spc, source) => Execute(source.Compilation, source.Trees, spc)
+        );
+    }
+
+    private static SyntaxTree? GetTargetTree(GeneratorSyntaxContext context)
+    {
+        var text = context.Node.SyntaxTree.GetText();
+        if (
+            text.Lines.Count > 0
+            && text.Lines[0].ToString().Trim().Equals(StartHeaderMarker, StringComparison.Ordinal)
+        )
+        {
+            return context.Node.SyntaxTree;
+        }
+
+        return null;
+    }
+
+    private static void Execute(
+        Compilation compilation,
+        ImmutableArray<SyntaxTree> trees,
+        SourceProductionContext context
+    )
+    {
+        if (trees.IsDefaultOrEmpty)
+            return;
+
+        foreach (var tree in trees.Distinct())
+        {
+            if (context.CancellationToken.IsCancellationRequested)
+                return;
+
+            var semanticModel = compilation.GetSemanticModel(tree);
+            var root = (CompilationUnitSyntax)tree.GetRoot();
+
+            string declaredNamespace = GetDeclaredNamespace(root);
+            var fileConfig = DirectivesConfig.Parse(tree.GetText());
+
+            string effectiveNamespace = !string.IsNullOrWhiteSpace(fileConfig.Namespace)
+                ? fileConfig.Namespace!
+                : declaredNamespace;
+
+            var declaredTypeNodes = root.DescendantNodes()
+                .OfType<BaseTypeDeclarationSyntax>()
+                .ToList();
+
+            if (declaredTypeNodes.Count == 0)
+                continue;
+
+            string rawFileName = Path.GetFileNameWithoutExtension(tree.FilePath);
+            string sourceClassName = string.IsNullOrWhiteSpace(rawFileName)
+                ? "GeneratedSource"
+                : $"{rawFileName}Source";
+
+            string cleanedSourceText = BuildCleanedFileSource(
+                root,
+                semanticModel,
+                effectiveNamespace,
+                fileConfig
+            );
+
+            bool isFileScopedNamespace = root
+                .Members.OfType<FileScopedNamespaceDeclarationSyntax>()
+                .Any();
+
+            var sb = new StringBuilder();
+
+            if (!string.IsNullOrEmpty(declaredNamespace))
+            {
+                if (isFileScopedNamespace)
+                {
+                    sb.AppendLine($"namespace {declaredNamespace};");
+                    sb.AppendLine();
+                }
+                else
+                {
+                    sb.AppendLine($"namespace {declaredNamespace}");
+                    sb.AppendLine("{");
+                }
+            }
+
+            string indent =
+                !string.IsNullOrEmpty(declaredNamespace) && !isFileScopedNamespace
+                    ? "    "
+                    : string.Empty;
+
+            sb.AppendLine($"{indent}internal static class {sourceClassName}");
+            sb.AppendLine($"{indent}{{");
+            sb.AppendLine(
+                $"{indent}    public const string FileName = \"{Path.GetFileNameWithoutExtension(tree.FilePath)}\";"
+            );
+            sb.AppendLine($"{indent}    public const string Namespace = \"{effectiveNamespace}\";");
+            sb.AppendLine(
+                $"{indent}    public const int DeclaredTypesCount = {declaredTypeNodes.Count};"
+            );
+            sb.AppendLine(
+                $"{indent}    public const bool HasFileScopedNamespace = {(isFileScopedNamespace ? "true" : "false")};"
+            );
+            sb.AppendLine(
+                $"{indent}    public const string SourceText = @\"{cleanedSourceText.Replace("\"", "\"\"")}\";"
+            );
+            sb.AppendLine($"{indent}}}");
+
+            if (!string.IsNullOrEmpty(declaredNamespace) && !isFileScopedNamespace)
+            {
+                sb.AppendLine("}");
+            }
+
+            context.AddSource(
+                $"{sourceClassName}.g.cs",
+                SourceText.From(sb.ToString(), Encoding.UTF8)
+            );
+        }
+    }
+
+    private static string GetDeclaredNamespace(CompilationUnitSyntax root)
+    {
+        var fileScopedNs = root
+            .Members.OfType<FileScopedNamespaceDeclarationSyntax>()
+            .FirstOrDefault();
+        if (fileScopedNs != null)
+            return fileScopedNs.Name.ToString();
+
+        var blockNs = root.Members.OfType<NamespaceDeclarationSyntax>().FirstOrDefault();
+        if (blockNs != null)
+            return blockNs.Name.ToString();
+
+        return string.Empty;
+    }
+
+    private static string BuildCleanedFileSource(
+        CompilationUnitSyntax root,
+        SemanticModel semanticModel,
+        string namespaceName,
+        DirectivesConfig config
+    )
+    {
+        var rewriter = new FullyQualifiedRewriter(semanticModel, config.ExcludedAttributes);
+        var processedRoot = (CompilationUnitSyntax)rewriter.Visit(root);
+
+        var sb = new StringBuilder();
+        bool isFileScoped = root.Members.OfType<FileScopedNamespaceDeclarationSyntax>().Any();
+
+        if (!string.IsNullOrEmpty(namespaceName))
+        {
+            if (isFileScoped)
+            {
+                sb.AppendLine($"namespace {namespaceName};");
+                sb.AppendLine();
+            }
+            else
+            {
+                sb.AppendLine($"namespace {namespaceName}");
+                sb.AppendLine("{");
+            }
+        }
+
+        foreach (var member in processedRoot.Members)
+        {
+            if (member is BaseNamespaceDeclarationSyntax nsDecl)
+            {
+                foreach (var innerMember in nsDecl.Members)
+                {
+                    sb.AppendLine(FormatMember(innerMember, config));
+                }
+            }
+            else if (member is BaseTypeDeclarationSyntax)
+            {
+                sb.AppendLine(FormatMember(member, config));
+            }
+        }
+
+        if (!string.IsNullOrEmpty(namespaceName) && !isFileScoped)
+        {
+            sb.AppendLine("}");
+        }
+
+        return sb.ToString().Trim();
+    }
+
+    private static string FormatMember(MemberDeclarationSyntax member, DirectivesConfig config)
+    {
+        if (member is TypeDeclarationSyntax typeDecl)
+        {
+            var modifierList = typeDecl.Modifiers.Select(m => m.Text).ToList();
+
+            if (config.Accessibility != null)
+            {
+                modifierList.RemoveAll(m =>
+                    m is "public" or "internal" or "private" or "protected"
+                );
+                modifierList.Insert(0, config.Accessibility.ToLowerInvariant());
+            }
+
+            if (config.KeepPartial)
+            {
+                if (!modifierList.Contains("partial"))
+                    modifierList.Add("partial");
+            }
+            else
+            {
+                modifierList.RemoveAll(m => m == "partial");
+            }
+
+            string modifierStr = string.Join(" ", modifierList);
+            string kindKeyword = typeDecl.Kind() switch
+            {
+                SyntaxKind.StructDeclaration => "struct",
+                SyntaxKind.InterfaceDeclaration => "interface",
+                SyntaxKind.RecordDeclaration => "record",
+                SyntaxKind.RecordStructDeclaration => "record struct",
+                _ => "class",
+            };
+
+            var sb = new StringBuilder();
+
+            foreach (var attrGroup in typeDecl.AttributeLists)
+            {
+                if (attrGroup.Attributes.Count > 0)
+                    sb.AppendLine($"    [{attrGroup.Attributes}]");
+            }
+
+            sb.AppendLine(
+                $"    {modifierStr} {kindKeyword} {typeDecl.Identifier}{typeDecl.TypeParameterList}{typeDecl.BaseList}"
+            );
+            sb.AppendLine(typeDecl.Members.FullOptionToFullString());
+            return sb.ToString();
+        }
+
+        return $"    {member.ToFullString().Trim()}";
+    }
+
+    private sealed class DirectivesConfig
+    {
+        public string? Namespace { get; set; }
+        public HashSet<string> ExcludedAttributes { get; } = new(StringComparer.Ordinal);
+        public bool KeepPartial { get; set; }
+        public string? Accessibility { get; set; }
+
+        public static DirectivesConfig Parse(SourceText text)
+        {
+            var config = new DirectivesConfig();
+            bool inHeader = false;
+
+            foreach (var line in text.Lines)
+            {
+                string lineText = line.ToString().Trim();
+
+                if (lineText.Equals(StartHeaderMarker, StringComparison.Ordinal))
+                {
+                    inHeader = true;
+                    continue;
+                }
+
+                if (lineText.Equals(EndHeaderMarker, StringComparison.Ordinal))
+                {
+                    break;
+                }
+
+                if (!inHeader || !lineText.StartsWith("// :"))
+                    continue;
+
+                string directiveText = lineText.Substring("// :".Length).Trim();
+                int spaceIndex = directiveText.IndexOf(' ');
+
+                string key =
+                    spaceIndex > 0 ? directiveText.Substring(0, spaceIndex) : directiveText;
+                string value =
+                    spaceIndex > 0 ? directiveText.Substring(spaceIndex + 1).Trim() : string.Empty;
+
+                switch (key.ToLowerInvariant())
+                {
+                    case "namespace":
+                        if (!string.IsNullOrWhiteSpace(value))
+                            config.Namespace = value;
+                        break;
+
+                    case "excludeattributes":
+                        if (!string.IsNullOrWhiteSpace(value))
+                        {
+                            var attrs = value.Split(
+                                [',', '|'],
+                                StringSplitOptions.RemoveEmptyEntries
+                            );
+                            foreach (var attr in attrs)
+                            {
+                                string trimmed = attr.Trim();
+                                config.ExcludedAttributes.Add(trimmed);
+                                if (trimmed.EndsWith("Attribute", StringComparison.Ordinal))
+                                {
+                                    config.ExcludedAttributes.Add(
+                                        trimmed.Substring(0, trimmed.Length - "Attribute".Length)
+                                    );
+                                }
+                            }
+                        }
+                        break;
+
+                    case "partial":
+                        if (bool.TryParse(value, out bool partialResult))
+                            config.KeepPartial = partialResult;
+                        break;
+
+                    case "accesibility":
+                    case "accessibility":
+                        if (
+                            value.Equals("Public", StringComparison.OrdinalIgnoreCase)
+                            || value.Equals("Internal", StringComparison.OrdinalIgnoreCase)
+                        )
+                        {
+                            config.Accessibility = value;
+                        }
+                        break;
+                }
+            }
+
+            return config;
+        }
+    }
+
+    private sealed class FullyQualifiedRewriter : CSharpSyntaxRewriter
+    {
+        private readonly SemanticModel _semanticModel;
+        private readonly HashSet<string> _excludedAttributes;
+
+        public FullyQualifiedRewriter(
+            SemanticModel semanticModel,
+            HashSet<string> excludedAttributes
+        )
+        {
+            _semanticModel = semanticModel;
+            _excludedAttributes = excludedAttributes;
+        }
+
+        public override SyntaxNode? VisitAttributeList(AttributeListSyntax node)
+        {
+            var remainingAttributes = new List<AttributeSyntax>();
+
+            foreach (var attribute in node.Attributes)
+            {
+                string rawName = attribute.Name.ToString().Trim();
+                if (_excludedAttributes.Contains(rawName))
+                    continue;
+
+                // Inspect the ORIGINAL syntax node attached to the tree BEFORE rewriting it
+                var symbolInfo = _semanticModel.GetSymbolInfo(attribute);
+                var attributeSymbol = symbolInfo.Symbol as IMethodSymbol;
+                var attributeType = attributeSymbol?.ContainingType;
+
+                if (attributeType != null)
+                {
+                    string globalMetadataName = attributeType.ToDisplayString(
+                        SymbolDisplayFormat.FullyQualifiedFormat
+                    );
+                    var fullyQualifiedNameSyntax = SyntaxFactory
+                        .ParseName(globalMetadataName)
+                        .WithLeadingTrivia(attribute.Name.GetLeadingTrivia())
+                        .WithTrailingTrivia(attribute.Name.GetTrailingTrivia());
+
+                    // First recursively visit arguments/expressions inside the attribute
+                    var rewrittenAttribute = (AttributeSyntax)VisitAttribute(attribute)!;
+                    remainingAttributes.Add(rewrittenAttribute.WithName(fullyQualifiedNameSyntax));
+                }
+                else
+                {
+                    var rewrittenAttribute = (AttributeSyntax)VisitAttribute(attribute)!;
+                    remainingAttributes.Add(rewrittenAttribute);
+                }
+            }
+
+            if (remainingAttributes.Count == 0)
+                return null;
+
+            return node.WithAttributes(SyntaxFactory.SeparatedList(remainingAttributes));
+        }
+
+        public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
+        {
+            // Compare SyntaxToken to SyntaxToken using node.Identifier
+            if (node.Parent is PropertyDeclarationSyntax prop && prop.Identifier == node.Identifier)
+                return base.VisitIdentifierName(node);
+
+            if (
+                node.Parent is MethodDeclarationSyntax method
+                && method.Identifier == node.Identifier
+            )
+                return base.VisitIdentifierName(node);
+
+            if (
+                node.Parent is VariableDeclaratorSyntax declarator
+                && declarator.Identifier == node.Identifier
+            )
+                return base.VisitIdentifierName(node);
+
+            if (
+                node.Parent is EnumMemberDeclarationSyntax enumMember
+                && enumMember.Identifier == node.Identifier
+            )
+                return base.VisitIdentifierName(node);
+
+            if (node.Parent is ParameterSyntax parameter && parameter.Identifier == node.Identifier)
+                return base.VisitIdentifierName(node);
+
+            if (
+                node.Parent is MemberAccessExpressionSyntax memberAccess
+                && memberAccess.Name == node
+            )
+                return base.VisitIdentifierName(node);
+
+            if (node.Parent is AttributeSyntax)
+                return base.VisitIdentifierName(node);
+
+            var typeInfo = _semanticModel.GetTypeInfo(node);
+            if (typeInfo.Type is { } typeSymbol && typeSymbol.TypeKind != TypeKind.Error)
+            {
+                string fullyQualified = typeSymbol.ToDisplayString(
+                    SymbolDisplayFormat.FullyQualifiedFormat
+                );
+                return SyntaxFactory
+                    .ParseTypeName(fullyQualified)
+                    .WithLeadingTrivia(node.GetLeadingTrivia())
+                    .WithTrailingTrivia(node.GetTrailingTrivia());
+            }
+
+            return base.VisitIdentifierName(node);
+        }
+    }
+}
+
+internal static class SyntaxExtensions
+{
+    public static string FullOptionToFullString(this SyntaxList<MemberDeclarationSyntax> members)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("    {");
+        foreach (var member in members)
+        {
+            sb.AppendLine($"        {member.ToFullString().Trim()}");
+        }
+        sb.AppendLine("    }");
+        return sb.ToString();
+    }
+}
