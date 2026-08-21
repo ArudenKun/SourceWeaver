@@ -15,25 +15,28 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        IncrementalValuesProvider<SyntaxTree> syntaxTrees = context
+        // Filter syntax trees containing the directive header and unwrap the nullable tuple
+        IncrementalValuesProvider<(SyntaxTree Tree, SemanticModel SemanticModel)> targets = context
             .SyntaxProvider.CreateSyntaxProvider(
                 predicate: static (node, _) => node is CompilationUnitSyntax,
-                transform: static (ctx, _) => GetTargetTree(ctx)
+                transform: static (ctx, _) => GetTarget(ctx)
             )
-            .Where(static tree => tree is not null)!;
+            .Where(static item => item.HasValue)
+            .Select(static (item, _) => item!.Value); // <--- Unwraps Nullable<T> to (SyntaxTree, SemanticModel)
 
-        IncrementalValueProvider<(
-            Compilation Compilation,
-            ImmutableArray<SyntaxTree> Trees
-        )> compilationAndTrees = context.CompilationProvider.Combine(syntaxTrees.Collect());
+        IncrementalValueProvider<
+            ImmutableArray<(SyntaxTree Tree, SemanticModel SemanticModel)>
+        > collectedTargets = targets.Collect();
 
         context.RegisterSourceOutput(
-            compilationAndTrees,
-            static (spc, source) => Execute(source.Compilation, source.Trees, spc)
+            collectedTargets,
+            static (spc, source) => Execute(source, spc)
         );
     }
 
-    private static SyntaxTree? GetTargetTree(GeneratorSyntaxContext context)
+    private static (SyntaxTree Tree, SemanticModel SemanticModel)? GetTarget(
+        GeneratorSyntaxContext context
+    )
     {
         var text = context.Node.SyntaxTree.GetText();
         if (
@@ -41,27 +44,25 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
             && text.Lines[0].ToString().Trim().Equals(StartHeaderMarker, StringComparison.Ordinal)
         )
         {
-            return context.Node.SyntaxTree;
+            return (context.Node.SyntaxTree, context.SemanticModel);
         }
 
         return null;
     }
 
     private static void Execute(
-        Compilation compilation,
-        ImmutableArray<SyntaxTree> trees,
+        ImmutableArray<(SyntaxTree Tree, SemanticModel SemanticModel)> targets,
         SourceProductionContext context
     )
     {
-        if (trees.IsDefaultOrEmpty)
+        if (targets.IsDefaultOrEmpty)
             return;
 
-        foreach (var tree in trees.Distinct())
+        foreach (var (tree, semanticModel) in targets.Distinct())
         {
             if (context.CancellationToken.IsCancellationRequested)
                 return;
 
-            var semanticModel = compilation.GetSemanticModel(tree);
             var root = (CompilationUnitSyntax)tree.GetRoot();
 
             string declaredNamespace = GetDeclaredNamespace(root);
@@ -78,7 +79,7 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
             if (declaredTypeNodes.Count == 0)
                 continue;
 
-            // 1. Rewrite syntax tree to resolve attributes and types to fully qualified global names
+            // 1. Rewrite syntax tree using the synchronized SemanticModel
             var rewriter = new FullyQualifiedRewriter(semanticModel, fileConfig.ExcludedAttributes);
             var processedRoot = (CompilationUnitSyntax)rewriter.Visit(root);
 
@@ -114,7 +115,6 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
                         : typeSymbol.ContainingNamespace.ToDisplayString();
 
                     string typeSource = FormatMember(typeNode, fileConfig);
-                    // Always wrap with block scope namespace syntax
                     string typeSourceWithNamespace = WrapWithBlockScopedNamespace(
                         typeSource,
                         effectiveNamespace
@@ -172,7 +172,7 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
                 $"{indent}    public const string Content = @\"{cleanedSourceText.Replace("\"", "\"\"")}\";"
             );
 
-            // Generate metadata classes
+            // Generate metadata static classes for each member type
             foreach (var typeMeta in typeMetadataList)
             {
                 sb.AppendLine();
