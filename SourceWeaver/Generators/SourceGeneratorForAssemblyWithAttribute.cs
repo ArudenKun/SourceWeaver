@@ -7,18 +7,15 @@ namespace SourceWeaver.Generators;
 using GeneratorContext = IncrementalGeneratorInitializationContext;
 
 [PublicAPI]
-public abstract class SourceGeneratorForDeclaredMemberWithAttribute<TAttribute, TDeclarationSyntax>
-    : SourceGeneratorForDeclaredMemberWithAttribute<TDeclarationSyntax>
+public abstract class SourceGeneratorForAssemblyWithAttribute<TAttribute>
+    : SourceGeneratorForAssemblyWithAttribute
     where TAttribute : Attribute
-    where TDeclarationSyntax : MemberDeclarationSyntax
 {
     protected override string AttributeMetadataName { get; } = typeof(TAttribute).FullName!;
 }
 
 [PublicAPI]
-public abstract class SourceGeneratorForDeclaredMemberWithAttribute<TDeclarationSyntax>
-    : IIncrementalGenerator
-    where TDeclarationSyntax : MemberDeclarationSyntax
+public abstract class SourceGeneratorForAssemblyWithAttribute : IIncrementalGenerator
 {
     protected abstract string AttributeMetadataName { get; }
 
@@ -41,18 +38,18 @@ public abstract class SourceGeneratorForDeclaredMemberWithAttribute<TDeclaration
             });
         }
 
-        // 2. Syntax provider using ForAttributeWithMetadataName
+        // 1. Syntax provider targeting Assembly-level attributes
         var targetsProvider = context
             .SyntaxProvider.ForAttributeWithMetadataName(
                 fullyQualifiedMetadataName: AttributeMetadataName,
                 predicate: IsSyntaxTarget,
                 transform: GetSyntaxTargets
             )
-            .SelectMany(static (items, _) => items); // Flattens targets when attribute is applied multiple times
+            .SelectMany(static (items, _) => items);
 
-        // 3. Late-stage compilation combination to maximize pipeline caching
+        // 2. Combine with Compilation and Options for incremental pipeline execution
         IncrementalValueProvider<(
-            (Compilation Compilation, ImmutableArray<GeneratorTargetContext> Targets),
+            (Compilation Compilation, ImmutableArray<AssemblyGeneratorTargetContext> Targets),
             AnalyzerConfigOptionsProvider Options
         )> pipeline = context
             .CompilationProvider.Combine(targetsProvider.Collect())
@@ -68,7 +65,7 @@ public abstract class SourceGeneratorForDeclaredMemberWithAttribute<TDeclaration
     private void OnExecute(
         SourceProductionContext spc,
         Compilation compilation,
-        ImmutableArray<GeneratorTargetContext> targets,
+        ImmutableArray<AssemblyGeneratorTargetContext> targets,
         AnalyzerConfigOptionsProvider options
     )
     {
@@ -82,8 +79,7 @@ public abstract class SourceGeneratorForDeclaredMemberWithAttribute<TDeclaration
 
             var (generatedCode, error) = _GenerateCode(
                 compilation,
-                target.Node,
-                target.Symbol,
+                target.Assembly,
                 target.Attribute,
                 options.GlobalOptions
             );
@@ -110,57 +106,55 @@ public abstract class SourceGeneratorForDeclaredMemberWithAttribute<TDeclaration
 
                 var location =
                     target.Attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation()
-                    ?? target.Node.GetLocation();
+                    ?? Location.None;
 
                 spc.ReportDiagnostic(Diagnostic.Create(descriptor, location));
                 continue;
             }
 
-            spc.AddSource(GenerateFilename(target.Symbol), generatedCode!);
+            spc.AddSource(GenerateFilename(target.Assembly, target.Attribute), generatedCode!);
         }
     }
 
     protected virtual bool IsSyntaxTarget(SyntaxNode node, CancellationToken _)
     {
-        return node is TDeclarationSyntax;
+        // Assembly attributes reside inside AttributeListSyntax nodes tagged with 'assembly:'
+        return node is AttributeListSyntax attributeList
+            && attributeList.Target?.Identifier.ValueText == "assembly";
     }
 
-    /// <summary>
-    /// Transforms the context into target items. Yields all matching attributes present on the target node.
-    /// </summary>
-    protected virtual IEnumerable<GeneratorTargetContext> GetSyntaxTargets(
+    protected virtual IEnumerable<AssemblyGeneratorTargetContext> GetSyntaxTargets(
         GeneratorAttributeSyntaxContext context,
         CancellationToken _
     )
     {
-        var node = Node((TDeclarationSyntax)context.TargetNode);
-        var symbol = context.TargetSymbol;
-
-        foreach (var attribute in context.Attributes)
+        // TargetSymbol for assembly attributes resolves to the IAssemblySymbol
+        if (context.TargetSymbol is IAssemblySymbol assemblySymbol)
         {
-            yield return new GeneratorTargetContext(node, symbol, attribute);
+            foreach (var attribute in context.Attributes)
+            {
+                yield return new AssemblyGeneratorTargetContext(assemblySymbol, attribute);
+            }
         }
     }
 
     protected abstract (string? GeneratedCode, DiagnosticDetail? Error) GenerateCode(
         Compilation compilation,
-        SyntaxNode node,
-        ISymbol symbol,
+        IAssemblySymbol assembly,
         AttributeData attribute,
         AnalyzerConfigOptions options
     );
 
     private (string? GeneratedCode, DiagnosticDetail? Error) _GenerateCode(
         Compilation compilation,
-        SyntaxNode node,
-        ISymbol symbol,
+        IAssemblySymbol assembly,
         AttributeData attribute,
         AnalyzerConfigOptions options
     )
     {
         try
         {
-            return GenerateCode(compilation, node, symbol, attribute, options);
+            return GenerateCode(compilation, assembly, attribute, options);
         }
         catch (Exception e)
         {
@@ -174,43 +168,34 @@ public abstract class SourceGeneratorForDeclaredMemberWithAttribute<TDeclaration
     protected const string Ext = ".g.cs";
     protected const int MaxFileLength = 255;
 
-    protected virtual string GenerateFilename(ISymbol symbol)
+    protected virtual string GenerateFilename(IAssemblySymbol assembly, AttributeData attribute)
     {
-        return $"{Format(symbol)}{Ext}";
+        var attrName = attribute.AttributeClass?.Name.TrimSuffix("Attribute") ?? AttributeName;
+        return $"{Format($"{assembly.Name}_{attrName}")}{Ext}";
 
-        static string Format(ISymbol? symbol) =>
-            string.Join(
-                    "_",
-                    (symbol?.ToDisplayString() ?? "Generated").Split(
-                        SourceWeaverConsts.InvalidFileNameChars
-                    )
-                )
+        static string Format(string rawName) =>
+            string.Join("_", rawName.Split(SourceWeaverConsts.InvalidFileNameChars))
                 .Truncate(MaxFileLength - Ext.Length);
     }
 
-    protected virtual SyntaxNode Node(TDeclarationSyntax node) => node;
-
     /// <summary>
-    /// Immutable value-comparable target context. Uses <see cref="SymbolEqualityComparer.Default"/>
-    /// to avoid breaking Roslyn incremental cache keys across build passes.
+    /// Immutable value-comparable target context for assembly attributes.
     /// </summary>
-    public readonly struct GeneratorTargetContext : IEquatable<GeneratorTargetContext>
+    public readonly struct AssemblyGeneratorTargetContext
+        : IEquatable<AssemblyGeneratorTargetContext>
     {
-        public SyntaxNode Node { get; }
-        public ISymbol Symbol { get; }
+        public IAssemblySymbol Assembly { get; }
         public AttributeData Attribute { get; }
 
-        public GeneratorTargetContext(SyntaxNode node, ISymbol symbol, AttributeData attribute)
+        public AssemblyGeneratorTargetContext(IAssemblySymbol assembly, AttributeData attribute)
         {
-            Node = node;
-            Symbol = symbol;
+            Assembly = assembly;
             Attribute = attribute;
         }
 
-        public bool Equals(GeneratorTargetContext other)
+        public bool Equals(AssemblyGeneratorTargetContext other)
         {
-            return Equals(Node, other.Node)
-                && SymbolEqualityComparer.Default.Equals(Symbol, other.Symbol)
+            return SymbolEqualityComparer.Default.Equals(Assembly, other.Assembly)
                 && Equals(
                     Attribute.ApplicationSyntaxReference,
                     other.Attribute.ApplicationSyntaxReference
@@ -218,15 +203,14 @@ public abstract class SourceGeneratorForDeclaredMemberWithAttribute<TDeclaration
         }
 
         public override bool Equals(object? obj) =>
-            obj is GeneratorTargetContext other && Equals(other);
+            obj is AssemblyGeneratorTargetContext other && Equals(other);
 
         public override int GetHashCode()
         {
             unchecked
             {
                 var hash = 17;
-                hash = hash * 23 + (Node?.GetHashCode() ?? 0);
-                hash = hash * 23 + SymbolEqualityComparer.Default.GetHashCode(Symbol);
+                hash = hash * 23 + SymbolEqualityComparer.Default.GetHashCode(Assembly);
                 hash = hash * 23 + (Attribute.ApplicationSyntaxReference?.GetHashCode() ?? 0);
                 return hash;
             }

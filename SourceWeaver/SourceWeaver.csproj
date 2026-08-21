@@ -4,18 +4,21 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <IsPackable>false</IsPackable>
     <IsRoslynComponent>true</IsRoslynComponent>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
   <PropertyGroup>
     <PackageId>SourceWeaver</PackageId>
-    <PackOnBuild>true</PackOnBuild>
+    <Authors>ArudenKun</Authors>
+    <Description>Helper library for creating rosalyn generators</Description>
+    <RepositoryUrl>https://github.com/ArudenKun/SourceWeaver</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,11 +27,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference
-      Include="Microsoft.CodeAnalysis.CSharp"
-      Version="[4.14.0]"
-      PrivateAssets="all"
-    />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="[4.14.0]" />
     <PackageReference Include="NuGetizer" Version="1.5.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

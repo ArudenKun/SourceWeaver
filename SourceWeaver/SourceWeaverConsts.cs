@@ -1,7 +1,10 @@
 namespace SourceWeaver;
 
-public static class SourceWeaverConsts
+internal static class SourceWeaverConsts
 {
+    public const string Ext = ".g.cs";
+    public const int MaxFileLength = 255;
+
     public static readonly char[] InvalidFileNameChars =
     [
         '\"',

@@ -3,8 +3,8 @@
 namespace SourceWeaver.Generators;
 
 [PublicAPI]
-public abstract class SourceGeneratorForDeclaredTypeWithAttribute
-    : SourceGeneratorForDeclaredMemberWithAttribute<TypeDeclarationSyntax>
+public abstract class SourceGeneratorForTypeWithAttribute
+    : SourceGeneratorForMemberWithAttribute<TypeDeclarationSyntax>
 {
     protected abstract (string? GeneratedCode, DiagnosticDetail? Error) GenerateCode(
         Compilation compilation,
@@ -24,8 +24,8 @@ public abstract class SourceGeneratorForDeclaredTypeWithAttribute
 }
 
 [PublicAPI]
-public abstract class SourceGeneratorForDeclaredTypeWithAttribute<TAttribute>
-    : SourceGeneratorForDeclaredMemberWithAttribute<TAttribute, TypeDeclarationSyntax>
+public abstract class SourceGeneratorForTypeWithAttribute<TAttribute>
+    : SourceGeneratorForMemberWithAttribute<TAttribute, TypeDeclarationSyntax>
     where TAttribute : Attribute
 {
     protected abstract (string? GeneratedCode, DiagnosticDetail? Error) GenerateCode(

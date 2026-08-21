@@ -3,8 +3,8 @@
 namespace SourceWeaver.Generators;
 
 [PublicAPI]
-public abstract class SourceGeneratorForDeclaredEnumWithAttribute
-    : SourceGeneratorForDeclaredMemberWithAttribute<EnumDeclarationSyntax>
+public abstract class SourceGeneratorForEnumWithAttribute
+    : SourceGeneratorForMemberWithAttribute<EnumDeclarationSyntax>
 {
     protected abstract (string GeneratedCode, DiagnosticDetail Error) GenerateCode(
         Compilation compilation,
@@ -24,8 +24,8 @@ public abstract class SourceGeneratorForDeclaredEnumWithAttribute
 }
 
 [PublicAPI]
-public abstract class SourceGeneratorForDeclaredEnumWithAttribute<TAttribute>
-    : SourceGeneratorForDeclaredMemberWithAttribute<TAttribute, EnumDeclarationSyntax>
+public abstract class SourceGeneratorForEnumWithAttribute<TAttribute>
+    : SourceGeneratorForMemberWithAttribute<TAttribute, EnumDeclarationSyntax>
     where TAttribute : Attribute
 {
     protected abstract (string GeneratedCode, DiagnosticDetail Error) GenerateCode(
