@@ -15,14 +15,13 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        // Filter syntax trees containing the directive header and unwrap the nullable tuple
         IncrementalValuesProvider<(SyntaxTree Tree, SemanticModel SemanticModel)> targets = context
             .SyntaxProvider.CreateSyntaxProvider(
                 predicate: static (node, _) => node is CompilationUnitSyntax,
                 transform: static (ctx, _) => GetTarget(ctx)
             )
             .Where(static item => item.HasValue)
-            .Select(static (item, _) => item!.Value); // <--- Unwraps Nullable<T> to (SyntaxTree, SemanticModel)
+            .Select(static (item, _) => item!.Value);
 
         IncrementalValueProvider<
             ImmutableArray<(SyntaxTree Tree, SemanticModel SemanticModel)>
@@ -72,19 +71,19 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
                 ? fileConfig.Namespace!
                 : declaredNamespace;
 
-            var declaredTypeNodes = root.DescendantNodes()
+            // 1. Get ORIGINAL declared type nodes directly attached to the tree
+            var originalTypeNodes = root.DescendantNodes()
                 .OfType<BaseTypeDeclarationSyntax>()
                 .ToList();
 
-            if (declaredTypeNodes.Count == 0)
+            if (originalTypeNodes.Count == 0)
                 continue;
 
-            // 1. Rewrite syntax tree using the synchronized SemanticModel
+            // 2. Rewrite the syntax tree to convert types and attributes to fully qualified global names
             var rewriter = new FullyQualifiedRewriter(semanticModel, fileConfig.ExcludedAttributes);
             var processedRoot = (CompilationUnitSyntax)rewriter.Visit(root);
 
-            // 2. Collect symbol metadata and type sources
-            var processedTypes = processedRoot
+            var processedTypeNodes = processedRoot
                 .DescendantNodes()
                 .OfType<BaseTypeDeclarationSyntax>()
                 .ToList();
@@ -102,9 +101,14 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
                     string SourceWithNamespace
                 )>();
 
-            foreach (var typeNode in processedTypes)
+            // 3. Pair original node (for semantic lookup) with processed node (for formatted source text)
+            for (int i = 0; i < originalTypeNodes.Count; i++)
             {
-                if (semanticModel.GetDeclaredSymbol(typeNode) is { } typeSymbol)
+                var originalNode = originalTypeNodes[i];
+                var processedNode = processedTypeNodes[i];
+
+                // Calling GetDeclaredSymbol on originalNode WORKS because originalNode is in the SyntaxTree
+                if (semanticModel.GetDeclaredSymbol(originalNode) is { } typeSymbol)
                 {
                     string name = typeSymbol.Name;
                     string fullName = typeSymbol
@@ -114,7 +118,7 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
                         ? string.Empty
                         : typeSymbol.ContainingNamespace.ToDisplayString();
 
-                    string typeSource = FormatMember(typeNode, fileConfig);
+                    string typeSource = FormatMember(processedNode, fileConfig);
                     string typeSourceWithNamespace = WrapWithBlockScopedNamespace(
                         typeSource,
                         effectiveNamespace
@@ -163,7 +167,7 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
             );
             sb.AppendLine($"{indent}    public const string Namespace = \"{effectiveNamespace}\";");
             sb.AppendLine(
-                $"{indent}    public const int DeclaredTypesCount = {declaredTypeNodes.Count};"
+                $"{indent}    public const int DeclaredTypesCount = {originalTypeNodes.Count};"
             );
             sb.AppendLine(
                 $"{indent}    public const bool HasFileScopedNamespace = {(isFileScopedNamespace ? "true" : "false")};"
@@ -172,7 +176,6 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
                 $"{indent}    public const string Content = @\"{cleanedSourceText.Replace("\"", "\"\"")}\";"
             );
 
-            // Generate metadata static classes for each member type
             foreach (var typeMeta in typeMetadataList)
             {
                 sb.AppendLine();
