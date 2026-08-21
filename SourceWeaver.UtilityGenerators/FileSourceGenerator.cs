@@ -8,7 +8,7 @@ using Microsoft.CodeAnalysis.Text;
 namespace SourceWeaver.UtilityGenerators;
 
 [Generator]
-internal sealed class SourceGenerator : IIncrementalGenerator
+internal sealed class FileSourceGenerator : IIncrementalGenerator
 {
     private const string StartHeaderMarker = "// [GenerateSourceText]";
     private const string EndHeaderMarker = "// [/]";
@@ -78,21 +78,62 @@ internal sealed class SourceGenerator : IIncrementalGenerator
             if (declaredTypeNodes.Count == 0)
                 continue;
 
+            // 1. Rewrite syntax tree to resolve attributes and types to fully qualified global names
+            var rewriter = new FullyQualifiedRewriter(semanticModel, fileConfig.ExcludedAttributes);
+            var processedRoot = (CompilationUnitSyntax)rewriter.Visit(root);
+
+            // 2. Collect symbol metadata and type sources
+            var processedTypes = processedRoot
+                .DescendantNodes()
+                .OfType<BaseTypeDeclarationSyntax>()
+                .ToList();
+
+            bool isFileScopedNamespace = root
+                .Members.OfType<FileScopedNamespaceDeclarationSyntax>()
+                .Any();
+
+            var typeMetadataList =
+                new List<(
+                    string Name,
+                    string FullName,
+                    string Namespace,
+                    string Source,
+                    string SourceWithNamespace
+                )>();
+
+            foreach (var typeNode in processedTypes)
+            {
+                if (semanticModel.GetDeclaredSymbol(typeNode) is { } typeSymbol)
+                {
+                    string name = typeSymbol.Name;
+                    string fullName = typeSymbol
+                        .ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                        .Replace("global::", string.Empty);
+                    string ns = typeSymbol.ContainingNamespace.IsGlobalNamespace
+                        ? string.Empty
+                        : typeSymbol.ContainingNamespace.ToDisplayString();
+
+                    string typeSource = FormatMember(typeNode, fileConfig);
+                    // Always wrap with block scope namespace syntax
+                    string typeSourceWithNamespace = WrapWithBlockScopedNamespace(
+                        typeSource,
+                        effectiveNamespace
+                    );
+
+                    typeMetadataList.Add((name, fullName, ns, typeSource, typeSourceWithNamespace));
+                }
+            }
+
             string rawFileName = Path.GetFileNameWithoutExtension(tree.FilePath);
             string sourceClassName = string.IsNullOrWhiteSpace(rawFileName)
                 ? "GeneratedSource"
                 : $"{rawFileName}Source";
 
             string cleanedSourceText = BuildCleanedFileSource(
-                root,
-                semanticModel,
+                processedRoot,
                 effectiveNamespace,
                 fileConfig
             );
-
-            bool isFileScopedNamespace = root
-                .Members.OfType<FileScopedNamespaceDeclarationSyntax>()
-                .Any();
 
             var sb = new StringBuilder();
 
@@ -128,8 +169,31 @@ internal sealed class SourceGenerator : IIncrementalGenerator
                 $"{indent}    public const bool HasFileScopedNamespace = {(isFileScopedNamespace ? "true" : "false")};"
             );
             sb.AppendLine(
-                $"{indent}    public const string SourceText = @\"{cleanedSourceText.Replace("\"", "\"\"")}\";"
+                $"{indent}    public const string Content = @\"{cleanedSourceText.Replace("\"", "\"\"")}\";"
             );
+
+            // Generate metadata classes
+            foreach (var typeMeta in typeMetadataList)
+            {
+                sb.AppendLine();
+                sb.AppendLine($"{indent}    public static class {typeMeta.Name}");
+                sb.AppendLine($"{indent}    {{");
+                sb.AppendLine($"{indent}        public const string Name = \"{typeMeta.Name}\";");
+                sb.AppendLine(
+                    $"{indent}        public const string FullName = \"{typeMeta.FullName}\";"
+                );
+                sb.AppendLine(
+                    $"{indent}        public const string Namespace = \"{typeMeta.Namespace}\";"
+                );
+                sb.AppendLine(
+                    $"{indent}        public const string Source = @\"{typeMeta.Source.Replace("\"", "\"\"")}\";"
+                );
+                sb.AppendLine(
+                    $"{indent}        public const string SourceWithNamespace = @\"{typeMeta.SourceWithNamespace.Replace("\"", "\"\"")}\";"
+                );
+                sb.AppendLine($"{indent}    }}");
+            }
+
             sb.AppendLine($"{indent}}}");
 
             if (!string.IsNullOrEmpty(declaredNamespace) && !isFileScopedNamespace)
@@ -142,6 +206,20 @@ internal sealed class SourceGenerator : IIncrementalGenerator
                 SourceText.From(sb.ToString(), Encoding.UTF8)
             );
         }
+    }
+
+    private static string WrapWithBlockScopedNamespace(string typeSource, string namespaceName)
+    {
+        if (string.IsNullOrEmpty(namespaceName))
+            return typeSource;
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"namespace {namespaceName}");
+        sb.AppendLine("{");
+        sb.AppendLine(typeSource);
+        sb.Append("}");
+
+        return sb.ToString();
     }
 
     private static string GetDeclaredNamespace(CompilationUnitSyntax root)
@@ -160,17 +238,15 @@ internal sealed class SourceGenerator : IIncrementalGenerator
     }
 
     private static string BuildCleanedFileSource(
-        CompilationUnitSyntax root,
-        SemanticModel semanticModel,
+        CompilationUnitSyntax processedRoot,
         string namespaceName,
         DirectivesConfig config
     )
     {
-        var rewriter = new FullyQualifiedRewriter(semanticModel, config.ExcludedAttributes);
-        var processedRoot = (CompilationUnitSyntax)rewriter.Visit(root);
-
         var sb = new StringBuilder();
-        bool isFileScoped = root.Members.OfType<FileScopedNamespaceDeclarationSyntax>().Any();
+        bool isFileScoped = processedRoot
+            .Members.OfType<FileScopedNamespaceDeclarationSyntax>()
+            .Any();
 
         if (!string.IsNullOrEmpty(namespaceName))
         {
@@ -255,7 +331,7 @@ internal sealed class SourceGenerator : IIncrementalGenerator
                 $"    {modifierStr} {kindKeyword} {typeDecl.Identifier}{typeDecl.TypeParameterList}{typeDecl.BaseList}"
             );
             sb.AppendLine(typeDecl.Members.FullOptionToFullString());
-            return sb.ToString();
+            return sb.ToString().Trim();
         }
 
         return $"    {member.ToFullString().Trim()}";
@@ -373,7 +449,6 @@ internal sealed class SourceGenerator : IIncrementalGenerator
                 if (_excludedAttributes.Contains(rawName))
                     continue;
 
-                // Inspect the ORIGINAL syntax node attached to the tree BEFORE rewriting it
                 var symbolInfo = _semanticModel.GetSymbolInfo(attribute);
                 var attributeSymbol = symbolInfo.Symbol as IMethodSymbol;
                 var attributeType = attributeSymbol?.ContainingType;
@@ -388,7 +463,6 @@ internal sealed class SourceGenerator : IIncrementalGenerator
                         .WithLeadingTrivia(attribute.Name.GetLeadingTrivia())
                         .WithTrailingTrivia(attribute.Name.GetTrailingTrivia());
 
-                    // First recursively visit arguments/expressions inside the attribute
                     var rewrittenAttribute = (AttributeSyntax)VisitAttribute(attribute)!;
                     remainingAttributes.Add(rewrittenAttribute.WithName(fullyQualifiedNameSyntax));
                 }
@@ -407,7 +481,6 @@ internal sealed class SourceGenerator : IIncrementalGenerator
 
         public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
         {
-            // Compare SyntaxToken to SyntaxToken using node.Identifier
             if (node.Parent is PropertyDeclarationSyntax prop && prop.Identifier == node.Identifier)
                 return base.VisitIdentifierName(node);
 
