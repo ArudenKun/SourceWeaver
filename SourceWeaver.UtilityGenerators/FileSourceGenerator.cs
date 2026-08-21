@@ -71,7 +71,7 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
                 ? fileConfig.Namespace!
                 : declaredNamespace;
 
-            // 1. Get ORIGINAL declared type nodes directly attached to the tree
+            // 1. Get ORIGINAL declared type nodes attached to the tree
             var originalTypeNodes = root.DescendantNodes()
                 .OfType<BaseTypeDeclarationSyntax>()
                 .ToList();
@@ -79,7 +79,7 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
             if (originalTypeNodes.Count == 0)
                 continue;
 
-            // 2. Rewrite the syntax tree to convert types and attributes to fully qualified global names
+            // 2. Rewrite tree with FullyQualifiedRewriter
             var rewriter = new FullyQualifiedRewriter(semanticModel, fileConfig.ExcludedAttributes);
             var processedRoot = (CompilationUnitSyntax)rewriter.Visit(root);
 
@@ -101,13 +101,12 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
                     string SourceWithNamespace
                 )>();
 
-            // 3. Pair original node (for semantic lookup) with processed node (for formatted source text)
+            // 3. Pair original node with processed node
             for (int i = 0; i < originalTypeNodes.Count; i++)
             {
                 var originalNode = originalTypeNodes[i];
                 var processedNode = processedTypeNodes[i];
 
-                // Calling GetDeclaredSymbol on originalNode WORKS because originalNode is in the SyntaxTree
                 if (semanticModel.GetDeclaredSymbol(originalNode) is { } typeSymbol)
                 {
                     string name = typeSymbol.Name;
@@ -484,6 +483,7 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
 
         public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
         {
+            // Do not rewrite member, parameter, or property declaration names
             if (node.Parent is PropertyDeclarationSyntax prop && prop.Identifier == node.Identifier)
                 return base.VisitIdentifierName(node);
 
@@ -514,7 +514,17 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
             )
                 return base.VisitIdentifierName(node);
 
+            // Guard against rewriting attribute targets/names, argument keys, named parameters, and typeof expressions
             if (node.Parent is AttributeSyntax)
+                return base.VisitIdentifierName(node);
+
+            if (node.Parent is NameEqualsSyntax)
+                return base.VisitIdentifierName(node);
+
+            if (node.Parent is AttributeArgumentSyntax)
+                return base.VisitIdentifierName(node);
+
+            if (node.Parent is TypeOfExpressionSyntax)
                 return base.VisitIdentifierName(node);
 
             var typeInfo = _semanticModel.GetTypeInfo(node);
