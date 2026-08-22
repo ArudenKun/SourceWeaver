@@ -13,6 +13,11 @@
       Include="..\SourceWeaver.Core\SourceWeaver.Core.csproj"
       OutputItemType="analyzer"
     />
+    <ProjectReference
+      Include="..\SourceWeaver.UtilityGenerators\SourceWeaver.UtilityGenerators.csproj"
+      OutputItemType="analyzer"
+      ReferenceOutputAssembly="false"
+    />
     <ProjectReference Include="..\SourceWeaver\SourceWeaver.csproj" OutputItemType="analyzer" />
   </ItemGroup>
 

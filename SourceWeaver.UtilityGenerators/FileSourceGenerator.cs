@@ -110,18 +110,20 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
                 if (semanticModel.GetDeclaredSymbol(originalNode) is { } typeSymbol)
                 {
                     string name = typeSymbol.Name;
-                    string fullName = typeSymbol
-                        .ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
-                        .Replace("global::", string.Empty);
-                    string ns = typeSymbol.ContainingNamespace.IsGlobalNamespace
-                        ? string.Empty
-                        : typeSymbol.ContainingNamespace.ToDisplayString();
+
+                    // Honor directive namespace override if provided
+                    string ns = !string.IsNullOrWhiteSpace(fileConfig.Namespace)
+                        ? fileConfig.Namespace!
+                        : (
+                            typeSymbol.ContainingNamespace.IsGlobalNamespace
+                                ? string.Empty
+                                : typeSymbol.ContainingNamespace.ToDisplayString()
+                        );
+
+                    string fullName = string.IsNullOrEmpty(ns) ? name : $"{ns}.{name}";
 
                     string typeSource = FormatMember(processedNode, fileConfig);
-                    string typeSourceWithNamespace = WrapWithBlockScopedNamespace(
-                        typeSource,
-                        effectiveNamespace
-                    );
+                    string typeSourceWithNamespace = WrapWithBlockScopedNamespace(typeSource, ns);
 
                     typeMetadataList.Add((name, fullName, ns, typeSource, typeSourceWithNamespace));
                 }

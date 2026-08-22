@@ -48,6 +48,7 @@
       Include="..\SourceWeaver.UtilityGenerators\SourceWeaver.UtilityGenerators.csproj"
       ReferenceOutputAssembly="true"
       OutputItemType="analyzer"
+      PrivateAssets="all"
     />
   </ItemGroup>
 </Project>
