@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="SourceWeaver.Core/SourceWeaver.Core.csproj" />
+  <Project Path="SourceWeaver.Tests.Analyzer/SourceWeaver.Tests.Analyzer.csproj" />
   <Project Path="SourceWeaver.Tests/SourceWeaver.Tests.csproj" />
   <Project Path="SourceWeaver.UtilityGenerators/SourceWeaver.UtilityGenerators.csproj" />
   <Project Path="SourceWeaver/SourceWeaver.csproj" />

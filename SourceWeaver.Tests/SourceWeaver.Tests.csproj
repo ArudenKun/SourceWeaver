@@ -1,22 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
-    <Nullable>enable</Nullable>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
-    <IsRoslynComponent>true</IsRoslynComponent>
-    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SourceWeaver\SourceWeaver.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference
-      Include="Microsoft.CodeAnalysis.CSharp"
-      Version="[4.14.0]"
-      PrivateAssets="all"
+    <ProjectReference
+      Include="..\SourceWeaver.Tests.Analyzer\SourceWeaver.Tests.Analyzer.csproj"
+      OutputItemType="analyzer"
+      ReferenceOutputAssembly="false"
     />
   </ItemGroup>
 </Project>
