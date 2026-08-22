@@ -231,12 +231,8 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
             .FirstOrDefault();
         if (fileScopedNs != null)
             return fileScopedNs.Name.ToString();
-
         var blockNs = root.Members.OfType<NamespaceDeclarationSyntax>().FirstOrDefault();
-        if (blockNs != null)
-            return blockNs.Name.ToString();
-
-        return string.Empty;
+        return blockNs != null ? blockNs.Name.ToString() : string.Empty;
     }
 
     private static string BuildCleanedFileSource(
@@ -403,6 +399,7 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
                                 }
                             }
                         }
+
                         break;
 
                     case "partial":
@@ -419,6 +416,7 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
                         {
                             config.Accessibility = value;
                         }
+
                         break;
                 }
             }
@@ -554,6 +552,7 @@ internal static class SyntaxExtensions
         {
             sb.AppendLine($"        {member.ToFullString().Trim()}");
         }
+
         sb.AppendLine("    }");
         return sb.ToString();
     }

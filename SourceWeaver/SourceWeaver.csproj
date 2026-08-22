@@ -43,6 +43,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\SourceWeaver.Core\SourceWeaver.Core.csproj" PrivateAssets="all" />
     <ProjectReference
       Include="..\SourceWeaver.UtilityGenerators\SourceWeaver.UtilityGenerators.csproj"
       ReferenceOutputAssembly="true"
