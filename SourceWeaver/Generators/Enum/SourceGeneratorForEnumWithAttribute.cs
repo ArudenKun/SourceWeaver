@@ -1,15 +1,15 @@
 ﻿using JetBrains.Annotations;
 
-namespace SourceWeaver.Generators;
+namespace SourceWeaver.Generators.Enum;
 
 [PublicAPI]
-public abstract class SourceGeneratorForPropertyWithAttribute
-    : SourceGeneratorForMemberWithAttribute<PropertyDeclarationSyntax>
+public abstract class SourceGeneratorForEnumWithAttribute
+    : SourceGeneratorForMemberWithAttribute<EnumDeclarationSyntax>
 {
     protected abstract (string GeneratedCode, DiagnosticDetail Error) GenerateCode(
         Compilation compilation,
         SyntaxNode node,
-        IPropertySymbol symbol,
+        INamedTypeSymbol symbol,
         AttributeData attribute,
         AnalyzerConfigOptions options
     );
@@ -20,18 +20,18 @@ public abstract class SourceGeneratorForPropertyWithAttribute
         ISymbol symbol,
         AttributeData attribute,
         AnalyzerConfigOptions options
-    ) => GenerateCode(compilation, node, (IPropertySymbol)symbol, attribute, options);
+    ) => GenerateCode(compilation, node, (INamedTypeSymbol)symbol, attribute, options);
 }
 
 [PublicAPI]
-public abstract class SourceGeneratorForPropertyWithAttribute<TAttribute>
-    : SourceGeneratorForMemberWithAttribute<TAttribute, PropertyDeclarationSyntax>
+public abstract class SourceGeneratorForEnumWithAttribute<TAttribute>
+    : SourceGeneratorForMemberWithAttribute<TAttribute, EnumDeclarationSyntax>
     where TAttribute : Attribute
 {
     protected abstract (string GeneratedCode, DiagnosticDetail Error) GenerateCode(
         Compilation compilation,
         SyntaxNode node,
-        IPropertySymbol symbol,
+        INamedTypeSymbol symbol,
         AttributeData attribute,
         AnalyzerConfigOptions options
     );
@@ -42,5 +42,5 @@ public abstract class SourceGeneratorForPropertyWithAttribute<TAttribute>
         ISymbol symbol,
         AttributeData attribute,
         AnalyzerConfigOptions options
-    ) => GenerateCode(compilation, node, (IPropertySymbol)symbol, attribute, options);
+    ) => GenerateCode(compilation, node, (INamedTypeSymbol)symbol, attribute, options);
 }

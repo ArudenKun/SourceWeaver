@@ -1,6 +1,6 @@
 ﻿using JetBrains.Annotations;
 
-namespace SourceWeaver.Generators;
+namespace SourceWeaver.Generators.Type;
 
 [PublicAPI]
 public abstract class SourceGeneratorForTypeWithAttribute

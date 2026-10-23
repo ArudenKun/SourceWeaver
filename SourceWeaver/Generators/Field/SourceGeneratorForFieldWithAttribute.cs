@@ -1,6 +1,6 @@
 ﻿using JetBrains.Annotations;
 
-namespace SourceWeaver.Generators;
+namespace SourceWeaver.Generators.Field;
 
 [PublicAPI]
 public abstract class SourceGeneratorForFieldWithAttribute

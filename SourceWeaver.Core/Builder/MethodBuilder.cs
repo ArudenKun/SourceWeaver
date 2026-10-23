@@ -10,6 +10,7 @@ public class MethodBuilder : BuilderBase<MethodBuilder>, IParameterized<MethodBu
     private readonly List<ParameterBuilder<MethodBuilder>> _parameters = [];
     private bool _override;
     private bool _virtual;
+    private bool _isPartial;
     private bool _isExplicitInterfaceImplementation;
 
     private Action<ICodeWriter>? _methodBodyWriter;
@@ -36,6 +37,8 @@ public class MethodBuilder : BuilderBase<MethodBuilder>, IParameterized<MethodBu
     public bool IsAbstract { get; private set; }
 
     public bool IsNoBodyBlock { get; private set; }
+
+    public bool IsPartial => _isPartial;
 
     public bool HasBody
     {
@@ -199,6 +202,29 @@ public class MethodBuilder : BuilderBase<MethodBuilder>, IParameterized<MethodBu
         return this;
     }
 
+    /// <summary>
+    /// Marks the method as <c>partial</c>.
+    /// Combine with <see cref="WithBody"/>/<see cref="WithExpressionBody"/> for an
+    /// implementing declaration, or with <see cref="WithNoBodyBlock"/> (or use
+    /// <see cref="MakePartialDeclaration"/>) for a defining declaration.
+    /// </summary>
+    public MethodBuilder MakePartial()
+    {
+        _isPartial = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Convenience for the defining half of a partial method pair:
+    /// emits <c>partial &lt;ret&gt; Name(...);</c> with no body.
+    /// </summary>
+    public MethodBuilder MakePartialDeclaration()
+    {
+        _isPartial = true;
+        IsNoBodyBlock = true;
+        return this;
+    }
+
     public MethodBuilder AddAttribute(string attribute)
     {
         var sanitized = attribute.Replace("[", string.Empty).Replace("]", string.Empty);
@@ -245,6 +271,17 @@ public class MethodBuilder : BuilderBase<MethodBuilder>, IParameterized<MethodBu
                     ? string.Empty
                     : "void"
                 : ReturnType.Trim();
+
+        // Prepend in reverse order of the desired output so the final
+        // sequence is: accessibility [extern] [static|abstract|virtual|override]
+        //                [async] [partial] <returnType>
+        //
+        // partial must be prepended *before* async so it ends up to the right
+        // of async, matching SA1206 and typical .NET source conventions
+        // (e.g. `public static async partial Task FooAsync()`).
+        // Guard against explicit-interface implementations which cannot be partial.
+        if (_isPartial && !_isExplicitInterfaceImplementation)
+            output = $"partial {output}";
 
         if (IsAsync)
             output = $"async {output}";

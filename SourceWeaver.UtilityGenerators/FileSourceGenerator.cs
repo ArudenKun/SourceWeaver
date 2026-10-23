@@ -527,8 +527,21 @@ internal sealed class FileSourceGenerator : IIncrementalGenerator
             if (node.Parent is TypeOfExpressionSyntax)
                 return base.VisitIdentifierName(node);
 
-            var typeInfo = _semanticModel.GetTypeInfo(node);
-            if (typeInfo.Type is { } typeSymbol && typeSymbol.TypeKind != TypeKind.Error)
+            // IMPORTANT: Use GetSymbolInfo (the symbol being referenced) rather than
+            // GetTypeInfo (the type of the expression). Using GetTypeInfo would rewrite
+            // value references — like a parameter or property access whose type is
+            // inferred from context — into the underlying type name, e.g. turning
+            // "NodePath = nodePath;" into "string = string;".
+            //
+            // Only identifiers that actually resolve to a type (or are used as one)
+            // should be fully qualified.
+            var symbolInfo = _semanticModel.GetSymbolInfo(node);
+            if (
+                symbolInfo.Symbol is ITypeSymbol typeSymbol
+                && typeSymbol.TypeKind != TypeKind.Error
+                && typeSymbol.TypeKind != TypeKind.TypeParameter
+                && typeSymbol.TypeKind != TypeKind.Dynamic
+            )
             {
                 string fullyQualified = typeSymbol.ToDisplayString(
                     SymbolDisplayFormat.FullyQualifiedFormat
