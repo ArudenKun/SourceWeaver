@@ -1,81 +1,53 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <IsRoslynComponent>true</IsRoslynComponent>
-    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
-  </PropertyGroup>
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <LangVersion>latest</LangVersion>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <IsRoslynComponent>true</IsRoslynComponent>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    </PropertyGroup>
 
-  <PropertyGroup>
-    <PackageId>SourceWeaver</PackageId>
-    <Authors>ArudenKun</Authors>
-    <Description>Helper library for creating rosalyn generators</Description>
-    <RepositoryUrl>https://github.com/ArudenKun/SourceWeaver</RepositoryUrl>
-  </PropertyGroup>
+    <PropertyGroup>
+        <PackageId>SourceWeaver</PackageId>
+        <Authors>ArudenKun</Authors>
+        <Description>Helper library for creating rosalyn generators</Description>
+        <RepositoryUrl>https://github.com/ArudenKun/SourceWeaver</RepositoryUrl>
+    </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference
-      Include="JetBrains.Annotations"
-      Version="2026.2.0"
-      PrivateAssets="all"
-      Pack="false"
-    />
-    <PackageReference Include="Meziantou.Polyfill" Version="1.0.161">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference
-      Include="Microsoft.CodeAnalysis.CSharp"
-      Version="[4.14.0]"
-      PrivateAssets="all"
-      Pack="false"
-    />
-    <PackageReference Include="NuGetizer" Version="1.5.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="RhoMicro.CodeAnalysis.UtilityGenerators" Version="24.1.9">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-  </ItemGroup>
+    <ItemGroup>
+        <PackageReference
+                Include="JetBrains.Annotations"
+                Version="2026.2.0"
+                PrivateAssets="all"
+                Pack="false"
+        />
+        <PackageReference Include="Meziantou.Polyfill" Version="1.0.169">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference
+                Include="Microsoft.CodeAnalysis.CSharp"
+                Version="[4.14.0]"
+                PrivateAssets="all"
+                Pack="false"
+        />
+        <PackageReference Include="NuGetizer" Version="1.5.1">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="RhoMicro.CodeAnalysis.UtilityGenerators" Version="24.1.9">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\SourceWeaver.Core\SourceWeaver.Core.csproj" PrivateAssets="all" />
-    <ProjectReference
-      Include="..\SourceWeaver.UtilityGenerators\SourceWeaver.UtilityGenerators.csproj"
-      ReferenceOutputAssembly="true"
-      OutputItemType="analyzer"
-    />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Update="Generators\AggregateSourceGeneratorForMemberWithInterfaces.cs">
-      <CodeLanguage>cs</CodeLanguage>
-      <DefaultPackFolder>content</DefaultPackFolder>
-      <BuildAction>Compile</BuildAction>
-    </Compile>
-    <Compile Update="Generators\Enum\SourceGeneratorForEnumWithAttribute.cs">
-      <CodeLanguage>cs</CodeLanguage>
-      <DefaultPackFolder>content</DefaultPackFolder>
-      <BuildAction>Compile</BuildAction>
-    </Compile>
-    <Compile Update="Generators\Field\SourceGeneratorForFieldWithAttribute.cs">
-      <CodeLanguage>cs</CodeLanguage>
-      <DefaultPackFolder>content</DefaultPackFolder>
-      <BuildAction>Compile</BuildAction>
-    </Compile>
-    <Compile Update="Generators\Property\SourceGeneratorForPropertyWithAttribute.cs">
-      <CodeLanguage>cs</CodeLanguage>
-      <DefaultPackFolder>content</DefaultPackFolder>
-      <BuildAction>Compile</BuildAction>
-    </Compile>
-    <Compile Update="Generators\Type\SourceGeneratorForTypeWithAttribute.cs">
-      <CodeLanguage>cs</CodeLanguage>
-      <DefaultPackFolder>content</DefaultPackFolder>
-      <BuildAction>Compile</BuildAction>
-    </Compile>
-  </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\SourceWeaver.Core\SourceWeaver.Core.csproj" PrivateAssets="all"/>
+        <ProjectReference
+                Include="..\SourceWeaver.UtilityGenerators\SourceWeaver.UtilityGenerators.csproj"
+                ReferenceOutputAssembly="true"
+                OutputItemType="analyzer"
+        />
+    </ItemGroup>
 </Project>

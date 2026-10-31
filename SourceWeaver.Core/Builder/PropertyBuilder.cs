@@ -153,19 +153,22 @@ public class PropertyBuilder : IBuilder
         return this;
     }
 
-    public ClassBuilder UseGetOnlyAutoProp()
+    public ClassBuilder UseGetOnlyAutoProp(string? defaultValue = null)
     {
         _autoprops = true;
         _getOnly = true;
+        _value = defaultValue;
         return Class;
     }
 
-    public ClassBuilder UseAutoProps() => UseAutoProps(null);
-
-    public ClassBuilder UseAutoProps(Accessibility? setterAccessibility)
+    public ClassBuilder UseAutoProps(
+        Accessibility? setterAccessibility = null,
+        string? defaultValue = null
+    )
     {
         _autoprops = true;
         _setterAccessibility = setterAccessibility;
+        _value = defaultValue;
         return Class;
     }
 
@@ -309,14 +312,32 @@ public class PropertyBuilder : IBuilder
         }
         else if (_autoprops)
         {
+            string accessor;
             if (_getOnly)
             {
-                writer.AppendLine($"{output} {{ get; }}");
-                return;
+                accessor = "{ get; }";
+            }
+            else
+            {
+                var set = $"{AccessibilityHelpers.Code(_setterAccessibility)} set".Trim();
+                accessor = $"{{ get; {set}; }}";
             }
 
-            var set = $"{AccessibilityHelpers.Code(_setterAccessibility)} set".Trim();
-            writer.AppendLine($"{output} {{ get; {set}; }}");
+            if (string.IsNullOrEmpty(value))
+            {
+                writer.AppendLine($"{output} {accessor}");
+            }
+            else if (value?.Length > maxCharacters)
+            {
+                writer.AppendLine($"{output} {accessor} =");
+                writer.IncreaseIndent();
+                writer.AppendLine($"{value};");
+                writer.DecreaseIndent();
+            }
+            else
+            {
+                writer.AppendLine($"{output} {accessor} = {value};");
+            }
             return;
         }
 
